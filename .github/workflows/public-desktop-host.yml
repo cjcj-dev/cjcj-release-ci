@@ -1,0 +1,64 @@
+name: Public desktop host baseline
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-host:
+    name: Official host smoke (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            platform: windows-x64
+            tuple: windows_x86_64_cjnative
+          - os: macos-15
+            platform: darwin-arm64
+            tuple: darwin_aarch64_cjnative
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      SDK_PLATFORM: ${{ matrix.platform }}
+      SDK_TUPLE: ${{ matrix.tuple }}
+    steps:
+      - name: Check out fixed public cjcj baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: cjcj-dev/cjcj
+          ref: ea6d3b5fc73b5e4cc2926535005a46a92109b2b9
+          persist-credentials: false
+      - name: Download and verify official host SDK from the public pin
+        shell: pwsh
+        run: |
+          $pin = node ci/host-toolchain-pin.mjs --platform $env:SDK_PLATFORM
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ci/release/prepare_base_sdk.mjs --platform $env:SDK_PLATFORM --toolchain $pin --outdir (Join-Path $env:RUNNER_TEMP 'sdk-download')
+          exit $LASTEXITCODE
+      - name: Compile and run a Cangjie program from the verified SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'sdk-install')
+          tar -xf $env:BASE_SDK_ARCHIVE -C $root.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = if ($IsWindows) { '.exe' } else { '' }
+          $compilers = @(Get-ChildItem -Path $root.FullName -Filter "cjc$exe" -File -Recurse | Where-Object { $_.Directory.Name -eq 'bin' })
+          if ($compilers.Count -ne 1) { throw "Expected one public cjc, found $($compilers.Count)" }
+          $cjc = $compilers[0].FullName
+          $env:CANGJIE_HOME = $compilers[0].Directory.Parent.FullName
+          $runtime = Join-Path $env:CANGJIE_HOME "runtime/lib/$env:SDK_TUPLE"
+          $env:PATH = (@($compilers[0].Directory.FullName, $runtime, (Join-Path $env:CANGJIE_HOME 'tools/bin'), $env:PATH) -join [IO.Path]::PathSeparator)
+          if ($IsMacOS) { $env:DYLD_LIBRARY_PATH = $runtime }
+          $work = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'cj-smoke')
+          Set-Location $work.FullName
+          Set-Content -LiteralPath hello.cj -Encoding utf8NoBOM -Value 'main() { println("desktop-host-ok") }'
+          & $cjc hello.cj -o "hello$exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $result = & (Join-Path $work.FullName "hello$exe")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (($result -join "`n") -cne 'desktop-host-ok') { throw "Unexpected program output: $result" }
+          Write-Output $result
+      - name: Test the public project's host pin logic
+        if: ${{ !cancelled() }}
+        run: node --test ci/host-toolchain-pin.test.mjs
