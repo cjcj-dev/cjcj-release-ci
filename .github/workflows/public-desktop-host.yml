@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: cjcj-dev/cjcj
-          ref: ea6d3b5fc73b5e4cc2926535005a46a92109b2b9
+          ref: 5da983cc36236f7d9c8ff51f21c5787bce609f98
           persist-credentials: false
       - name: Download and verify official host SDK from the public pin
         shell: pwsh
