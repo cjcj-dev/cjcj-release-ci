@@ -49,11 +49,19 @@ jobs:
           $env:CANGJIE_HOME = $compilers[0].Directory.Parent.FullName
           $runtime = Join-Path $env:CANGJIE_HOME "runtime/lib/$env:SDK_TUPLE"
           $env:PATH = (@($compilers[0].Directory.FullName, $runtime, (Join-Path $env:CANGJIE_HOME 'tools/bin'), $env:PATH) -join [IO.Path]::PathSeparator)
-          if ($IsMacOS) { $env:DYLD_LIBRARY_PATH = $runtime }
+          $sdkArgs = @()
+          if ($IsMacOS) {
+            $appleSdk = xcrun --sdk macosx --show-sdk-path
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:SDKROOT = $appleSdk.Trim()
+            if (-not (Test-Path -LiteralPath (Join-Path $env:SDKROOT 'usr/lib/libSystem.tbd'))) { throw 'Missing libSystem in the selected macOS SDK' }
+            $sdkArgs = @('--sysroot', $env:SDKROOT)
+            $env:DYLD_LIBRARY_PATH = $runtime
+          }
           $work = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'cj-smoke')
           Set-Location $work.FullName
           Set-Content -LiteralPath hello.cj -Encoding utf8NoBOM -Value 'main() { println("desktop-host-ok") }'
-          & $cjc hello.cj -o "hello$exe"
+          & $cjc @sdkArgs hello.cj -o "hello$exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $result = & (Join-Path $work.FullName "hello$exe")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
